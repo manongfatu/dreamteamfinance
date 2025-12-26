@@ -3,6 +3,9 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { MONTHS } from '@lib/date';
 import clsx from 'clsx';
+import { useEffect, useMemo, useState } from 'react';
+import { getFirebaseAuth } from '@/lib/firebase/client';
+import { useSettings } from '@lib/settingsStore';
 
 function IconHome() {
   return (
@@ -54,6 +57,28 @@ export default function Sidebar({
   const pathname = usePathname() || '/';
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
   const isMonthActive = (slug: string) => pathname.includes(`/month/${slug}`);
+  const [email, setEmail] = useState<string | null>(null);
+  const { settings } = useSettings();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const auth = await getFirebaseAuth();
+        const unsub = auth.onAuthStateChanged(u => setEmail(u?.email ?? null));
+        return () => unsub();
+      } catch {
+        setEmail(null);
+      }
+    })();
+  }, []);
+
+  const firstName = useMemo(() => {
+    const fromSettings = (settings.firstName || '').trim();
+    if (fromSettings) return fromSettings;
+    // Fallback to auth display: use email local-part if no name
+    if (email) return email.split('@')[0];
+    return '';
+  }, [settings.firstName, email]);
 
   return (
     <aside className={clsx("sidebar", { open, collapsed })}>
@@ -67,6 +92,13 @@ export default function Sidebar({
           {collapsed ? '›' : '‹'}
         </button>
       </div>
+      {!collapsed && (firstName || email) ? (
+        <div className="greeting">
+          <span>Hola, </span>
+          <span className="name">{firstName || email}</span>
+          <span>!</span>
+        </div>
+      ) : null}
 
       <nav className="nav">
         <div className="nav-section-label">Overview</div>

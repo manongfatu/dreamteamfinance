@@ -30,6 +30,21 @@
       ],
       "@domain/*": [
         "types/*"
+      ],
+      "@/components/*": [
+        "app/components/*"
+      ],
+      "@/lib/*": [
+        "lib/*"
+      ],
+      "@/utils/*": [
+        "utils/*"
+      ],
+      "@/domain/*": [
+        "types/*"
+      ],
+      "@/*": [
+        "./*"
       ]
     },
     "plugins": [

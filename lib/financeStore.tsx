@@ -10,6 +10,8 @@ import type {
   InstallmentScheduleItem
 } from '../types/finance';
 import { getCurrentYear } from './date';
+import { getFirebaseAuth } from './firebase/client';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 type FinanceContextValue = {
   year: number;
@@ -74,7 +76,10 @@ function persistToStorage(data: YearData) {
 
 export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<YearData>(() => loadFromStorage());
+  const [uid, setUid] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const initialised = useRef(false);
+  const syncing = useRef(false);
 
   // Persist on changes
   useEffect(() => {
@@ -83,7 +88,58 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     persistToStorage(data);
+    // Also persist to Firestore under the logged-in user
+    (async () => {
+      if (!uid) return;
+      try {
+        const db = getFirestore();
+        const ref = doc(db, 'users', uid, 'states', 'finance');
+        // avoid echo loops
+        if (syncing.current) return;
+        await setDoc(ref, { data, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+      } catch {
+        // ignore network errors - localStorage still has a copy
+      }
+    })();
   }, [data]);
+
+  // Attach to auth and hydrate from Firestore if available
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    (async () => {
+      try {
+        const auth = await getFirebaseAuth();
+        unsub = auth.onAuthStateChanged(async (u) => {
+          setUid(u?.uid ?? null);
+          setUserEmail(u?.email ?? null);
+          if (!u?.uid) return;
+          try {
+            const db = getFirestore();
+            const ref = doc(db, 'users', u.uid, 'states', 'finance');
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+              const remote = snap.data()?.data as YearData | undefined;
+              if (remote && Array.isArray(remote.months) && remote.months.length === 12) {
+                syncing.current = true;
+                setData(remote);
+                syncing.current = false;
+              } else {
+                // Initialize remote with current local data if empty
+                await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+              }
+            } else {
+              await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+            }
+          } catch {
+            // ignore fetch errors; keep local state
+          }
+        });
+      } catch {
+        // auth not available, skip
+      }
+    })();
+    return () => { if (unsub) unsub(); };
+  }, []);
 
   // Helper to get month
   const getMonthData = useCallback((monthIndex: number) => {

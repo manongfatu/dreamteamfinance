@@ -1,8 +1,11 @@
 "use client";
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import Sidebar from "./Sidebar";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const isAuthRoute = pathname?.startsWith("/login") || pathname?.startsWith("/register") || pathname?.startsWith("/forgot") || pathname?.startsWith("/reset");
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -28,24 +31,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [collapsed]);
 
+  if (isAuthRoute) {
+    // No grid shell on auth routes; let pages center themselves
+    return <main className="main">{children}</main>;
+  }
+
   return (
     <div className={`app-shell ${collapsed ? "collapsed" : ""}`}>
       <div className="mobile-topbar">
-        <button
-          className="mobile-nav-button button"
-          aria-label="Open navigation"
-          onClick={() => setOpen(true)}
-        >
+        <button className="mobile-nav-button button" aria-label="Open navigation" onClick={() => setOpen(true)}>
           ☰
         </button>
         <div className="mobile-topbar-brand">Dream Team Finance</div>
       </div>
-      <Sidebar
-        open={open}
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed((v) => !v)}
-        onNavigate={() => setOpen(false)}
-      />
+      <Sidebar open={open} collapsed={collapsed} onToggleCollapse={() => setCollapsed((v) => !v)} onNavigate={() => setOpen(false)} />
       {open ? <div className="sidebar-overlay" onClick={() => setOpen(false)} /> : null}
       <main className="main">{children}</main>
     </div>

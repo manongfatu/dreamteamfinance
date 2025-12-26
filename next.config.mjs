@@ -1,9 +1,16 @@
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  experimental: {
-    optimizeCss: true,
+  // Pin the workspace root to this app to avoid alias confusion
+  turbopack: {
+    root: __dirname,
   },
+  // Removed experimental.optimizeCss to avoid external 'critters' requirement on Vercel
   headers: async () => {
     return [
       {

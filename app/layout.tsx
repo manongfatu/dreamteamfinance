@@ -12,8 +12,8 @@ export const metadata: Metadata = {
   applicationName: 'Dream Team Finance',
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/favicon.svg',
-    shortcut: '/favicon.svg'
+    icon: '/icon.svg',
+    shortcut: '/icon.svg'
   }
 };
 

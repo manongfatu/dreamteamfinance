@@ -7,9 +7,12 @@ const CategoryPieChart = dynamic(() => import('./shared/charts/CategoryPieChart'
 import { MONTHS } from '@lib/date';
 import { exportYearCsv } from '@utils/csv';
 import { useMemo } from 'react';
+import { getFirebaseAuth } from '@/lib/firebase/client';
+import { signOut } from 'firebase/auth';
 
 export default function DashboardPage() {
   const { data, computeTotals, computeYtdTotals, allEntriesYtd } = useFinance();
+
   const ytdTotals = computeYtdTotals();
   const barData = useMemo(() => {
     return MONTHS.map(m => {
@@ -24,6 +27,25 @@ export default function DashboardPage() {
     <div className="container">
       <header className="app-header">
         <div className="title">Dashboard · {data.year}</div>
+        <div className="controls">
+          <button
+            className="button"
+            onClick={async () => {
+              try {
+                // Clear finance local state
+                try { localStorage.removeItem('pfm:v1'); } catch {}
+                // Sign out Firebase client
+                try { const auth = await getFirebaseAuth(); await signOut(auth); } catch {}
+                // Clear session cookie on server
+                await fetch('/api/session/logout', { method: 'POST' });
+              } finally {
+                window.location.href = '/login';
+              }
+            }}
+          >
+            Logout
+          </button>
+        </div>
       </header>
 
       <div className="grid grid-2">

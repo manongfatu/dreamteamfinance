@@ -4,17 +4,26 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 type Settings = {
   remindersEnabled: boolean;
   email: string;
+  firstName: string;
+  lastName: string;
+  contactNumber: string;
 };
 
 type SettingsContextValue = {
   settings: Settings;
   setRemindersEnabled: (enabled: boolean) => void;
   setEmail: (email: string) => void;
+  setFirstName: (name: string) => void;
+  setLastName: (name: string) => void;
+  setContactNumber: (phone: string) => void;
 };
 
 const DEFAULTS: Settings = {
   remindersEnabled: false,
-  email: ''
+  email: '',
+  firstName: '',
+  lastName: '',
+  contactNumber: ''
 };
 
 const STORAGE_KEY = 'pfm:settings:v1';
@@ -60,12 +69,24 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const setEmail = useCallback((email: string) => {
     setSettings(prev => ({ ...prev, email }));
   }, []);
+  const setFirstName = useCallback((firstName: string) => {
+    setSettings(prev => ({ ...prev, firstName }));
+  }, []);
+  const setLastName = useCallback((lastName: string) => {
+    setSettings(prev => ({ ...prev, lastName }));
+  }, []);
+  const setContactNumber = useCallback((contactNumber: string) => {
+    setSettings(prev => ({ ...prev, contactNumber }));
+  }, []);
 
   const value = useMemo<SettingsContextValue>(() => ({
     settings,
     setRemindersEnabled,
-    setEmail
-  }), [settings, setRemindersEnabled, setEmail]);
+    setEmail,
+    setFirstName,
+    setLastName,
+    setContactNumber
+  }), [settings, setRemindersEnabled, setEmail, setFirstName, setLastName, setContactNumber]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }
