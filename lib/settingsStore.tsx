@@ -1,5 +1,7 @@
 "use client";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { getFirebaseAuth } from '@/lib/firebase/client';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 type Settings = {
   remindersEnabled: boolean;
