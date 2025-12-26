@@ -1,6 +1,6 @@
 "use client";
 export const dynamic = "force-dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { signInWithEmailAndPassword } from "firebase/auth";
@@ -8,10 +8,10 @@ import { useSettings } from "@/lib/settingsStore";
 
 export default function LoginPage() {
   const router = useRouter();
-  const params = useSearchParams();
   const { setEmail: setNotifyEmail } = useSettings();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [redirectTo, setRedirectTo] = useState("/");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,8 +27,7 @@ export default function LoginPage() {
       if (!res.ok) throw new Error("Failed to establish session");
       // Default notifications to signed-in email if not set yet
       try { setNotifyEmail(cred.user.email || email); } catch {}
-      const redirect = params.get("redirect") || "/";
-      router.replace(redirect);
+      router.replace(redirectTo || "/");
     } catch (e: any) {
       const code = e?.code;
       const friendly =
@@ -43,12 +42,14 @@ export default function LoginPage() {
   }
 
   useEffect(() => {
-    // If already logged in, redirect
-    (async () => {
-      // If session cookie exists, /api/auth/me may still be Prisma; skip and rely on client state
-      // Optionally ping a lightweight endpoint; here we just stay
-    })();
-  }, [router]);
+    try {
+      const url = new URL(window.location.href);
+      const target = url.searchParams.get("redirect");
+      setRedirectTo(target || "/");
+    } catch {
+      setRedirectTo("/");
+    }
+  }, []);
 
   return (
     <div
