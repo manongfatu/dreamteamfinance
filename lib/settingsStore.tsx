@@ -49,11 +49,14 @@ function load(): Settings {
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [settings, setSettings] = useState<Settings>(() => load());
-  const ready = useRef(false);
+  const readyRef = useRef(false);
+  const [uid, setUid] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // Persist to localStorage and (if signed in) to Firestore
   useEffect(() => {
-    if (!ready.current) {
-      ready.current = true;
+    if (!readyRef.current) {
+      readyRef.current = true;
       return;
     }
     try {
@@ -61,7 +64,55 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
-  }, [settings]);
+    (async () => {
+      if (!uid) return;
+      try {
+        const db = getFirestore();
+        const ref = doc(db, 'users', uid, 'states', 'settings');
+        await setDoc(
+          ref,
+          { data: settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      } catch {
+        // ignore network errors
+      }
+    })();
+  }, [settings, uid, userEmail]);
+
+  // Hydrate from Firestore when user logs in
+  useEffect(() => {
+    let unsubscribe: undefined | (() => void);
+    (async () => {
+      try {
+        const auth = await getFirebaseAuth();
+        unsubscribe = auth.onAuthStateChanged(async (u) => {
+          setUid(u?.uid ?? null);
+          setUserEmail(u?.email ?? null);
+          if (!u?.uid) return;
+          try {
+            const db = getFirestore();
+            const ref = doc(db, 'users', u.uid, 'states', 'settings');
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+              const remote = (snap.data()?.data ?? {}) as Partial<Settings>;
+              setSettings((prev) => ({ ...prev, ...remote, email: prev.email || (u.email ?? '') }));
+            } else {
+              const initial = { ...settings };
+              if (!initial.email && u.email) initial.email = u.email;
+              await setDoc(ref, { data: initial, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+              setSettings(initial);
+            }
+          } catch {
+            // ignore
+          }
+        });
+      } catch {
+        // no auth in this environment
+      }
+    })();
+    return () => { if (unsubscribe) unsubscribe(); };
+  }, []);
 
   const setRemindersEnabled = useCallback((enabled: boolean) => {
     setSettings(prev => ({ ...prev, remindersEnabled: enabled }));
