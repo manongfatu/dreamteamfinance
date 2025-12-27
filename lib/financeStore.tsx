@@ -83,7 +83,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
 
   const saveRemote = useCallback(async (next: YearData) => {
-    if (!uid || !canSyncRef.current) return;
+    if (!uid) return;
     try {
       const db = getFirestore();
       const ref = doc(db, 'users', uid, 'states', 'finance');

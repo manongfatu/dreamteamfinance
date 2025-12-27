@@ -36,8 +36,8 @@ export default function EntryForm({ initial, onSubmit }: Props) {
 
   const isValid = useMemo(() => {
     const amt = Number(amount);
-    return title.trim().length > 0 && Number.isFinite(amt) && amt >= 0 && category.trim().length > 0 && /^\d{4}-\d{2}-\d{2}$/.test(date);
-  }, [title, amount, category, date]);
+    return title.trim().length > 0 && Number.isFinite(amt) && amt >= 0 && /^\d{4}-\d{2}-\d{2}$/.test(date);
+  }, [title, amount, date]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,7 +49,7 @@ export default function EntryForm({ initial, onSubmit }: Props) {
       title: title.trim(),
       amount: Number(amount),
       entryType,
-      category: category.trim(),
+      ...(category.trim() ? { category: category.trim() } : {}),
       date: new Date(date).toISOString(),
       notes: notes.trim() || undefined
     };

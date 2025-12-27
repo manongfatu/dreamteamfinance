@@ -5,7 +5,7 @@ export interface Entry {
   title: string;
   amount: number;
   entryType: EntryType;
-  category: string;
+  category?: string;
   date: string; // ISO string
   notes?: string;
   // When true, indicates this entry is part of an installment schedule
