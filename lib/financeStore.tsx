@@ -11,7 +11,7 @@ import type {
 } from '../types/finance';
 import { getCurrentYear } from './date';
 import { getFirebaseAuth } from './firebase/client';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
 
 type FinanceContextValue = {
   year: number;
@@ -82,6 +82,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const initialised = useRef(false);
   const syncing = useRef(false);
   const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
+  const unsubscribeRef = useRef<null | (() => void)>(null);
 
   const saveRemote = useCallback(async (next: YearData) => {
     if (!uid) return;
@@ -107,7 +108,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     persistToStorage(data);
     // Also persist to Firestore under the logged-in user
     (async () => {
-      if (!uid || !canSyncRef.current) return;
+      if (!uid) return;
       try {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'finance');
@@ -122,14 +123,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
 
   // Attach to auth and hydrate from Firestore if available
   useEffect(() => {
-    let unsub: (() => void) | undefined;
+    let authUnsub: (() => void) | undefined;
     (async () => {
       try {
         const auth = await getFirebaseAuth();
-        unsub = auth.onAuthStateChanged(async (u) => {
+        authUnsub = auth.onAuthStateChanged(async (u) => {
           setUid(u?.uid ?? null);
           setUserEmail(u?.email ?? null);
           canSyncRef.current = false;
+          // detach previous finance snapshot
+          if (unsubscribeRef.current) {
+            unsubscribeRef.current();
+            unsubscribeRef.current = null;
+          }
           if (!u?.uid) return;
           try {
             const db = getFirestore();
@@ -140,23 +146,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             }, { merge: true });
 
             const ref = doc(db, 'users', u.uid, 'states', 'finance');
+            // Initial one-time fetch to decide whether to seed remote
             const snap = await getDoc(ref);
-            if (snap.exists()) {
+            if (!snap.exists()) {
+              // Seed remote with current local if nothing exists yet (first-time user)
+              await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+            } else {
               const remote = snap.data()?.data as YearData | undefined;
               if (remote && Array.isArray(remote.months) && remote.months.length === 12) {
                 syncing.current = true;
                 setData(remote);
                 syncing.current = false;
-                canSyncRef.current = true;
-              } else {
-                // Initialize remote with current local data if empty
-                await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
-                canSyncRef.current = true;
               }
-            } else {
-              await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
-              canSyncRef.current = true;
             }
+            // Subscribe to live updates so we always rehydrate from remote
+            unsubscribeRef.current = onSnapshot(ref, (docSnap) => {
+              if (!docSnap.exists()) return;
+              const remote = docSnap.data()?.data as YearData | undefined;
+              if (!remote || !Array.isArray(remote.months) || remote.months.length !== 12) return;
+              syncing.current = true;
+              setData(remote);
+              syncing.current = false;
+            });
+            canSyncRef.current = true;
           } catch {
             // ignore fetch errors; keep local state
             canSyncRef.current = false;
@@ -166,8 +178,23 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         // auth not available, skip
       }
     })();
-    return () => { if (unsub) unsub(); };
+    return () => { if (authUnsub) authUnsub(); if (unsubscribeRef.current) unsubscribeRef.current(); };
   }, []);
+
+  // Flush when page is hidden/unloaded to reduce data loss risk
+  useEffect(() => {
+    const handler = () => { void saveRemote(data); };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handler);
+      window.addEventListener('beforeunload', handler);
+    }
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handler);
+        window.removeEventListener('beforeunload', handler);
+      }
+    };
+  }, [data, saveRemote]);
 
   // Helper to get month
   const getMonthData = useCallback((monthIndex: number) => {
