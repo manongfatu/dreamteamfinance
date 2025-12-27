@@ -31,6 +31,7 @@ const DEFAULTS: Settings = {
 };
 
 const STORAGE_KEY = 'pfm:settings:v1';
+const UNSYNCED_SETTINGS_KEY = 'pfm:unsynced:settings';
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
@@ -80,8 +81,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           { settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() },
           { merge: true }
         );
+        try { localStorage.removeItem(UNSYNCED_SETTINGS_KEY); } catch {}
       } catch {
         // ignore network errors
+        try { localStorage.setItem(UNSYNCED_SETTINGS_KEY, JSON.stringify({ ts: Date.now(), data: settings })); } catch {}
       }
     })();
   }, [settings, uid, userEmail]);
@@ -111,6 +114,18 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
                 setSettings((prev) => ({ ...prev, email: u.email! }));
               }
               canSyncRef.current = true;
+            }
+            // Push unsynced settings if any
+            try {
+              const raw = localStorage.getItem(UNSYNCED_SETTINGS_KEY);
+              if (raw) {
+                const uns = JSON.parse(raw) as { ts: number; data: Settings };
+                await setDoc(ref, { settings: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+                localStorage.removeItem(UNSYNCED_SETTINGS_KEY);
+                setSettings((prev) => ({ ...prev, ...uns.data }));
+              }
+            } catch {
+              // keep unsynced for later
             }
             setIsReady(true);
           } catch {
@@ -154,9 +169,17 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (uid) {
         const db = getFirestore();
         const ref = doc(db, 'users', uid);
-        // fire-and-forget to avoid UI hanging under backoff
-        setDoc(ref, { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
-          .catch(() => {/* swallow */});
+        // bounded wait (2s) to avoid hanging the UI
+        const savePromise = setDoc(ref, { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+        const ok = await Promise.race<boolean>([
+          savePromise.then(() => true).catch(() => false),
+          new Promise<boolean>(res => setTimeout(() => res(false), 2000))
+        ]);
+        if (!ok) {
+          try { localStorage.setItem(UNSYNCED_SETTINGS_KEY, JSON.stringify({ ts: Date.now(), data: next })); } catch {}
+        } else {
+          try { localStorage.removeItem(UNSYNCED_SETTINGS_KEY); } catch {}
+        }
       }
       return true;
     } catch {

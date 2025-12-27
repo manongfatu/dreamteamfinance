@@ -37,6 +37,7 @@ type FinanceContextValue = {
 const FinanceContext = createContext<FinanceContextValue | null>(null);
 
 const STORAGE_KEY = 'pfm:v1';
+const UNSYNCED_FINANCE_KEY = 'pfm:unsynced:finance';
 
 function emptyYear(year: number): YearData {
   return {
@@ -98,6 +99,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const ref = doc(db, 'users', uid);
       await setDoc(ref, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
       lastSavedSigRef.current = sig;
+      try { localStorage.removeItem(UNSYNCED_FINANCE_KEY); } catch {}
       return true;
     } catch {
       // swallow; UI stays responsive and localStorage has a copy
@@ -107,6 +109,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       // back off to avoid hammering quota for 10s
       cooldownUntilRef.current = Date.now() + 10_000;
+      try { localStorage.setItem(UNSYNCED_FINANCE_KEY, JSON.stringify({ ts: Date.now(), data: next })); } catch {}
       return false;
     }
   }, [uid, userEmail]);
@@ -159,6 +162,22 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
               // Seed remote with current local data for first-time user
               await setDoc(ref, { finance: data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
               lastSavedSigRef.current = JSON.stringify(data);
+            }
+            // If there is any unsynced finance snapshot, try to push it now
+            try {
+              const raw = localStorage.getItem(UNSYNCED_FINANCE_KEY);
+              if (raw) {
+                const uns = JSON.parse(raw) as { ts: number; data: YearData };
+                await setDoc(ref, { finance: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+                lastSavedSigRef.current = JSON.stringify(uns.data);
+                localStorage.removeItem(UNSYNCED_FINANCE_KEY);
+                // Hydrate with the just-pushed version
+                syncing.current = true;
+                setData(uns.data);
+                syncing.current = false;
+              }
+            } catch {
+              // keep unsynced for later retries
             }
             canSyncRef.current = true; // now safe to write
             setIsReady(true);
