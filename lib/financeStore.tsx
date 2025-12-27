@@ -16,6 +16,7 @@ import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestor
 type FinanceContextValue = {
   year: number;
   data: YearData;
+  isReady: boolean;
   getMonthData: (monthIndex: number) => MonthData;
   addEntry: (monthIndex: number, entry: Omit<Entry, 'id'>) => void;
   updateEntry: (monthIndex: number, id: string, updates: Partial<Omit<Entry, 'id'>>) => void;
@@ -81,15 +82,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const initialised = useRef(false);
   const syncing = useRef(false);
-  const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
+  const canSyncRef = useRef(false); // set true only after first remote read completes
   const unsubscribeRef = useRef<null | (() => void)>(null);
+  const [isReady, setIsReady] = useState(false); // UI readiness (after initial remote attempt)
 
   const saveRemote = useCallback(async (next: YearData) => {
-    if (!uid || !canSyncRef.current) return;
+    if (!uid) return;
     try {
       const db = getFirestore();
-      const ref = doc(db, 'users', uid, 'states', 'finance');
-      await setDoc(ref, { data: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+      const ref = doc(db, 'users', uid);
+      await setDoc(ref, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
     } catch {
       // swallow; UI stays responsive and localStorage has a copy
       if (process.env.NODE_ENV !== 'production') {
@@ -111,10 +113,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
-        const ref = doc(db, 'users', uid, 'states', 'finance');
+        const ref = doc(db, 'users', uid);
         // avoid echo loops
         if (syncing.current) return;
-        await setDoc(ref, { data, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+        await setDoc(ref, { finance: data, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
       } catch {
         // ignore network errors - localStorage still has a copy
       }
@@ -136,23 +138,14 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             unsubscribeRef.current();
             unsubscribeRef.current = null;
           }
-          if (!u?.uid) return;
+          if (!u?.uid) { setIsReady(true); return; }
           try {
             const db = getFirestore();
-            // Ensure root user doc exists with basic info
-            await setDoc(doc(db, 'users', u.uid), {
-              email: u.email ?? null,
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-
-            const ref = doc(db, 'users', u.uid, 'states', 'finance');
-            // Initial one-time fetch to decide whether to seed remote
+            const ref = doc(db, 'users', u.uid);
+            // Initial one-time fetch; do NOT seed with defaults
             const snap = await getDoc(ref);
-            if (!snap.exists()) {
-              // Seed remote with current local if nothing exists yet (first-time user)
-              await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
-            } else {
-              const remote = snap.data()?.data as YearData | undefined;
+            if (snap.exists()) {
+              const remote = snap.data()?.finance as YearData | undefined;
               if (remote && Array.isArray(remote.months) && remote.months.length === 12) {
                 syncing.current = true;
                 setData(remote);
@@ -162,20 +155,23 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
             // Subscribe to live updates so we always rehydrate from remote
             unsubscribeRef.current = onSnapshot(ref, (docSnap) => {
               if (!docSnap.exists()) return;
-              const remote = docSnap.data()?.data as YearData | undefined;
+              const remote = docSnap.data()?.finance as YearData | undefined;
               if (!remote || !Array.isArray(remote.months) || remote.months.length !== 12) return;
               syncing.current = true;
               setData(remote);
               syncing.current = false;
             });
-            canSyncRef.current = true;
+            canSyncRef.current = true; // now safe to write
+            setIsReady(true);
           } catch {
             // ignore fetch errors; keep local state
             canSyncRef.current = false;
+            setIsReady(true);
           }
         });
       } catch {
         // auth not available, skip
+        setIsReady(true);
       }
     })();
     return () => { if (authUnsub) authUnsub(); if (unsubscribeRef.current) unsubscribeRef.current(); };
@@ -390,6 +386,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const value: FinanceContextValue = useMemo(() => ({
     year: data.year,
     data,
+    isReady,
     getMonthData,
     addEntry,
     updateEntry,

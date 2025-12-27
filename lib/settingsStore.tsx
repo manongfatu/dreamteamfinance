@@ -13,6 +13,7 @@ type Settings = {
 
 type SettingsContextValue = {
   settings: Settings;
+  isReady: boolean;
   setRemindersEnabled: (enabled: boolean) => void;
   setEmail: (email: string) => void;
   setFirstName: (name: string) => void;
@@ -56,6 +57,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [uid, setUid] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
+  const [isReady, setIsReady] = useState(false);
 
   // Persist to localStorage and (if signed in) to Firestore
   useEffect(() => {
@@ -72,10 +74,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
-        const ref = doc(db, 'users', uid, 'states', 'settings');
+        const ref = doc(db, 'users', uid);
         await setDoc(
           ref,
-          { data: settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() },
+          { settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() },
           { merge: true }
         );
       } catch {
@@ -94,35 +96,32 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           setUid(u?.uid ?? null);
           setUserEmail(u?.email ?? null);
           canSyncRef.current = false;
-          if (!u?.uid) return;
+          if (!u?.uid) { setIsReady(true); return; }
           try {
             const db = getFirestore();
-            // Ensure root user doc exists with basic info
-            await setDoc(doc(db, 'users', u.uid), {
-              email: u.email ?? null,
-              updatedAt: new Date().toISOString()
-            }, { merge: true });
-
-            const ref = doc(db, 'users', u.uid, 'states', 'settings');
+            const ref = doc(db, 'users', u.uid);
             const snap = await getDoc(ref);
-            if (snap.exists()) {
-              const remote = (snap.data()?.data ?? {}) as Partial<Settings>;
+            if (snap.exists() && snap.data()?.settings) {
+              const remote = (snap.data()?.settings ?? {}) as Partial<Settings>;
               setSettings((prev) => ({ ...prev, ...remote, email: prev.email || (u.email ?? '') }));
               canSyncRef.current = true;
             } else {
-              const initial = { ...settings };
-              if (!initial.email && u.email) initial.email = u.email;
-              await setDoc(ref, { data: initial, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
-              setSettings(initial);
+              // Do not seed defaults; wait for user to save something
+              if (!settings.email && u.email) {
+                setSettings((prev) => ({ ...prev, email: u.email! }));
+              }
               canSyncRef.current = true;
             }
+            setIsReady(true);
           } catch {
             // ignore
             canSyncRef.current = false;
+            setIsReady(true);
           }
         });
       } catch {
         // no auth in this environment
+        setIsReady(true);
       }
     })();
     return () => { if (unsubscribe) unsubscribe(); };
@@ -154,10 +153,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // persist remote if signed in and hydrated
       if (uid && canSyncRef.current) {
         const db = getFirestore();
-        const ref = doc(db, 'users', uid, 'states', 'settings');
+        const ref = doc(db, 'users', uid);
         await setDoc(
           ref,
-          { data: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() },
+          { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() },
           { merge: true }
         );
       }
@@ -169,13 +168,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<SettingsContextValue>(() => ({
     settings,
+    isReady,
     setRemindersEnabled,
     setEmail,
     setFirstName,
     setLastName,
     setContactNumber,
     updateProfileAndSave
-  }), [settings, setRemindersEnabled, setEmail, setFirstName, setLastName, setContactNumber, updateProfileAndSave]);
+  }), [settings, isReady, setRemindersEnabled, setEmail, setFirstName, setLastName, setContactNumber, updateProfileAndSave]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

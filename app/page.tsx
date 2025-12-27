@@ -11,7 +11,7 @@ import { getFirebaseAuth } from '@/lib/firebase/client';
 import { signOut } from 'firebase/auth';
 
 export default function DashboardPage() {
-  const { data, computeTotals, computeYtdTotals, allEntriesYtd, flushRemote } = useFinance();
+  const { data, isReady, computeTotals, computeYtdTotals, allEntriesYtd, flushRemote } = useFinance();
 
   const ytdTotals = computeYtdTotals();
   const barData = useMemo(() => {
@@ -23,6 +23,9 @@ export default function DashboardPage() {
 
   const entries = allEntriesYtd();
 
+  if (!isReady) {
+    return <div className="container"><div className="card"><div className="card-body">Restoring your data…</div></div></div>;
+  }
   return (
     <div className="container">
       <header className="app-header">
