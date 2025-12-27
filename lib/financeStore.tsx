@@ -82,6 +82,17 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const syncing = useRef(false);
   const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
 
+  const saveRemote = useCallback(async (next: YearData) => {
+    if (!uid || !canSyncRef.current) return;
+    try {
+      const db = getFirestore();
+      const ref = doc(db, 'users', uid, 'states', 'finance');
+      await setDoc(ref, { data: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+    } catch {
+      // swallow; UI stays responsive and localStorage has a copy
+    }
+  }, [uid, userEmail]);
+
   // Persist on changes
   useEffect(() => {
     if (!initialised.current) {
@@ -162,37 +173,46 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setData(prev => {
       const months = [...prev.months];
       const month = { ...months[monthIndex], entries: [...months[monthIndex].entries] };
-      month.entries.unshift({ ...entry, id: nanoid() });
+      const nextEntry = { ...entry, id: nanoid() };
+      month.entries.unshift(nextEntry);
       months[monthIndex] = month;
-      return { ...prev, months };
+      const next = { ...prev, months };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const updateEntry = useCallback((monthIndex: number, id: string, updates: Partial<Omit<Entry, 'id'>>) => {
     setData(prev => {
       const months = [...prev.months];
       const month = { ...months[monthIndex], entries: months[monthIndex].entries.map(e => e.id === id ? { ...e, ...updates } : e) };
       months[monthIndex] = month;
-      return { ...prev, months };
+      const next = { ...prev, months };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const deleteEntry = useCallback((monthIndex: number, id: string) => {
     setData(prev => {
       const months = [...prev.months];
       const month = { ...months[monthIndex], entries: months[monthIndex].entries.filter(e => e.id !== id) };
       months[monthIndex] = month;
-      return { ...prev, months };
+      const next = { ...prev, months };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const clearMonth = useCallback((monthIndex: number) => {
     setData(prev => {
       const months = [...prev.months];
       months[monthIndex] = { ...months[monthIndex], entries: [] };
-      return { ...prev, months };
+      const next = { ...prev, months };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   // Build a schedule starting from startDate for numberOfMonths
   const buildSchedule = useCallback((startDateISO: string, numberOfMonths: number): InstallmentScheduleItem[] => {
@@ -220,30 +240,36 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const addInstallment = useCallback((installment: Omit<Installment, 'id' | 'schedule' | 'createdAt'>) => {
     setData(prev => {
       const schedule = buildSchedule(installment.startDate, installment.numberOfMonths);
-      const next: Installment = {
+      const nextInstallment: Installment = {
         ...installment,
         id: nanoid(),
         schedule,
         createdAt: new Date().toISOString()
       };
-      const installments = [...(prev.installments ?? []), next];
-      return { ...prev, installments };
+      const installments = [...(prev.installments ?? []), nextInstallment];
+      const next = { ...prev, installments };
+      void saveRemote(next);
+      return next;
     });
-  }, [buildSchedule]);
+  }, [buildSchedule, saveRemote]);
 
   const updateInstallment = useCallback((id: string, updates: Partial<Omit<Installment, 'id' | 'schedule' | 'createdAt'>>) => {
     setData(prev => {
       const installments = (prev.installments ?? []).map(ins => ins.id === id ? { ...ins, ...updates } : ins);
-      return { ...prev, installments };
+      const next = { ...prev, installments };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const deleteInstallment = useCallback((id: string) => {
     setData(prev => {
       const installments = (prev.installments ?? []).filter(ins => ins.id !== id);
-      return { ...prev, installments };
+      const next = { ...prev, installments };
+      void saveRemote(next);
+      return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const toggleInstallmentPayment = useCallback((installmentId: string, year: number, monthIndex: number, paid: boolean) => {
     setData(prev => {
@@ -295,9 +321,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       installment.schedule[schedIdx] = schedItem;
       next.installments![installmentIdx] = installment;
       next.months[monthIndex] = month;
+      void saveRemote(next);
       return next;
     });
-  }, []);
+  }, [saveRemote]);
 
   const computeTotals = useCallback((entries: Entry[]): SummaryTotals => {
     const totals = {
