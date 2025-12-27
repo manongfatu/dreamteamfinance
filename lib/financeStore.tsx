@@ -85,6 +85,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const canSyncRef = useRef(false); // set true only after first remote read completes
   const unsubscribeRef = useRef<null | (() => void)>(null);
   const [isReady, setIsReady] = useState(false); // UI readiness (after initial remote attempt)
+  const saveTimerRef = useRef<number | null>(null);
 
   const saveRemote = useCallback(async (next: YearData) => {
     if (!uid) return;
@@ -109,18 +110,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     }
     persistToStorage(data);
     // Also persist to Firestore under the logged-in user
-    (async () => {
-      if (!uid || !canSyncRef.current) return;
-      try {
-        const db = getFirestore();
-        const ref = doc(db, 'users', uid);
-        // avoid echo loops
-        if (syncing.current) return;
-        await setDoc(ref, { finance: data, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
-      } catch {
-        // ignore network errors - localStorage still has a copy
-      }
-    })();
+    if (!uid || !canSyncRef.current || syncing.current) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    // debounce to reduce write frequency
+    saveTimerRef.current = window.setTimeout(() => {
+      void saveRemote(data);
+      saveTimerRef.current = null;
+    }, 300);
   }, [data]);
 
   // Attach to auth and hydrate from Firestore if available
@@ -153,7 +152,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
               }
             }
             // Subscribe to live updates so we always rehydrate from remote
-            unsubscribeRef.current = onSnapshot(ref, (docSnap) => {
+            unsubscribeRef.current = onSnapshot(ref, { includeMetadataChanges: true }, (docSnap) => {
+              // ignore local echoes
+              if (docSnap.metadata.hasPendingWrites) return;
               if (!docSnap.exists()) return;
               const remote = docSnap.data()?.finance as YearData | undefined;
               if (!remote || !Array.isArray(remote.months) || remote.months.length !== 12) return;
@@ -205,7 +206,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       month.entries.unshift(nextEntry);
       months[monthIndex] = month;
       const next = { ...prev, months };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -216,7 +216,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const month = { ...months[monthIndex], entries: months[monthIndex].entries.map(e => e.id === id ? { ...e, ...updates } : e) };
       months[monthIndex] = month;
       const next = { ...prev, months };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -227,7 +226,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const month = { ...months[monthIndex], entries: months[monthIndex].entries.filter(e => e.id !== id) };
       months[monthIndex] = month;
       const next = { ...prev, months };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -237,7 +235,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const months = [...prev.months];
       months[monthIndex] = { ...months[monthIndex], entries: [] };
       const next = { ...prev, months };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -276,7 +273,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       };
       const installments = [...(prev.installments ?? []), nextInstallment];
       const next = { ...prev, installments };
-      void saveRemote(next);
       return next;
     });
   }, [buildSchedule, saveRemote]);
@@ -285,7 +281,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setData(prev => {
       const installments = (prev.installments ?? []).map(ins => ins.id === id ? { ...ins, ...updates } : ins);
       const next = { ...prev, installments };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -294,7 +289,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     setData(prev => {
       const installments = (prev.installments ?? []).filter(ins => ins.id !== id);
       const next = { ...prev, installments };
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
@@ -349,7 +343,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       installment.schedule[schedIdx] = schedItem;
       next.installments![installmentIdx] = installment;
       next.months[monthIndex] = month;
-      void saveRemote(next);
       return next;
     });
   }, [saveRemote]);
