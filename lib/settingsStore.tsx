@@ -75,12 +75,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
-        const ref = doc(db, 'users', uid);
-        await setDoc(
-          ref,
-          { settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() },
-          { merge: true }
-        );
+        const rootRef = doc(db, 'users', uid);
+        const statesRef = doc(db, 'users', uid, 'states', 'settings');
+        await Promise.allSettled([
+          setDoc(rootRef, { settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+          setDoc(statesRef, { data: settings, email: userEmail ?? settings.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+        ]);
         try { localStorage.removeItem(UNSYNCED_SETTINGS_KEY); } catch {}
       } catch {
         // ignore network errors
@@ -102,10 +102,16 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           if (!u?.uid) { setIsReady(true); return; }
           try {
             const db = getFirestore();
-            const ref = doc(db, 'users', u.uid);
-            const snap = await getDoc(ref);
-            if (snap.exists() && snap.data()?.settings) {
-              const remote = (snap.data()?.settings ?? {}) as Partial<Settings>;
+            const rootRef = doc(db, 'users', u.uid);
+            const statesRef = doc(db, 'users', u.uid, 'states', 'settings');
+            const [subSnap, rootSnap] = await Promise.allSettled([getDoc(statesRef), getDoc(rootRef)]);
+            let remote: Partial<Settings> | null = null;
+            if (subSnap.status === 'fulfilled' && subSnap.value.exists() && subSnap.value.data()?.data) {
+              remote = (subSnap.value.data()?.data ?? {}) as Partial<Settings>;
+            } else if (rootSnap.status === 'fulfilled' && rootSnap.value.exists() && rootSnap.value.data()?.settings) {
+              remote = (rootSnap.value.data()?.settings ?? {}) as Partial<Settings>;
+            }
+            if (remote) {
               setSettings((prev) => ({ ...prev, ...remote, email: prev.email || (u.email ?? '') }));
               canSyncRef.current = true;
             } else {
@@ -120,7 +126,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
               const raw = localStorage.getItem(UNSYNCED_SETTINGS_KEY);
               if (raw) {
                 const uns = JSON.parse(raw) as { ts: number; data: Settings };
-                await setDoc(ref, { settings: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+                await Promise.allSettled([
+                  setDoc(rootRef, { settings: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+                  setDoc(statesRef, { data: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+                ]);
                 localStorage.removeItem(UNSYNCED_SETTINGS_KEY);
                 setSettings((prev) => ({ ...prev, ...uns.data }));
               }
@@ -168,11 +177,15 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // persist remote if signed in and hydrated
       if (uid) {
         const db = getFirestore();
-        const ref = doc(db, 'users', uid);
-        // bounded wait (2s) to avoid hanging the UI
-        const savePromise = setDoc(ref, { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+        const rootRef = doc(db, 'users', uid);
+        const statesRef = doc(db, 'users', uid, 'states', 'settings');
+        // bounded wait (2s) to avoid hanging the UI; succeed if either location writes
+        const savePromise = Promise.allSettled([
+          setDoc(rootRef, { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+          setDoc(statesRef, { data: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+        ]).then(results => results.some(r => r.status === 'fulfilled'));
         const ok = await Promise.race<boolean>([
-          savePromise.then(() => true).catch(() => false),
+          savePromise,
           new Promise<boolean>(res => setTimeout(() => res(false), 2000))
         ]);
         if (!ok) {

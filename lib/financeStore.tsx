@@ -96,8 +96,13 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     if (lastSavedSigRef.current === sig) return true;
     try {
       const db = getFirestore();
-      const ref = doc(db, 'users', uid);
-      await setDoc(ref, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+      const rootRef = doc(db, 'users', uid);
+      const statesRef = doc(db, 'users', uid, 'states', 'finance');
+      // Try both locations to be compatible with different rules
+      await Promise.allSettled([
+        setDoc(rootRef, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+        setDoc(statesRef, { data: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+      ]);
       lastSavedSigRef.current = sig;
       try { localStorage.removeItem(UNSYNCED_FINANCE_KEY); } catch {}
       return true;
@@ -147,20 +152,28 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           if (!u?.uid) { setIsReady(true); return; }
           try {
             const db = getFirestore();
-            const ref = doc(db, 'users', u.uid);
-            // Initial one-time fetch; do NOT seed with defaults
-            const snap = await getDoc(ref);
-            if (snap.exists()) {
-              const remote = snap.data()?.finance as YearData | undefined;
-              if (remote && Array.isArray(remote.months) && remote.months.length === 12) {
+            const rootRef = doc(db, 'users', u.uid);
+            const statesRef = doc(db, 'users', u.uid, 'states', 'finance');
+            // Initial one-time fetch; prefer subcollection if present
+            const [subSnap, rootSnap] = await Promise.allSettled([getDoc(statesRef), getDoc(rootRef)]);
+            let remote: YearData | undefined;
+            if (subSnap.status === 'fulfilled' && subSnap.value.exists()) {
+              remote = subSnap.value.data()?.data as YearData | undefined;
+            }
+            if (!remote && rootSnap.status === 'fulfilled' && rootSnap.value.exists()) {
+              remote = rootSnap.value.data()?.finance as YearData | undefined;
+            }
+            if (remote && Array.isArray(remote.months) && remote.months.length === 12) {
                 syncing.current = true;
                 setData(remote);
                 syncing.current = false;
                 lastSavedSigRef.current = JSON.stringify(remote);
-              }
             } else {
-              // Seed remote with current local data for first-time user
-              await setDoc(ref, { finance: data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+              // Seed remote with current local data for first-time user (to both locations)
+              await Promise.allSettled([
+                setDoc(rootRef, { finance: data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+                setDoc(statesRef, { data: data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+              ]);
               lastSavedSigRef.current = JSON.stringify(data);
             }
             // If there is any unsynced finance snapshot, try to push it now
@@ -168,7 +181,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
               const raw = localStorage.getItem(UNSYNCED_FINANCE_KEY);
               if (raw) {
                 const uns = JSON.parse(raw) as { ts: number; data: YearData };
-                await setDoc(ref, { finance: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+                await Promise.allSettled([
+                  setDoc(rootRef, { finance: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true }),
+                  setDoc(statesRef, { data: uns.data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+                ]);
                 lastSavedSigRef.current = JSON.stringify(uns.data);
                 localStorage.removeItem(UNSYNCED_FINANCE_KEY);
                 // Hydrate with the just-pushed version
