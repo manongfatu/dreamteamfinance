@@ -69,7 +69,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     (async () => {
-      if (!uid) return;
+      if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'settings');
@@ -152,7 +152,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // persist local immediately
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
       // persist remote if signed in and hydrated
-      if (uid) {
+      if (uid && canSyncRef.current) {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'settings');
         await setDoc(

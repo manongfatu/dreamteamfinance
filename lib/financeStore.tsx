@@ -85,7 +85,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const unsubscribeRef = useRef<null | (() => void)>(null);
 
   const saveRemote = useCallback(async (next: YearData) => {
-    if (!uid) return;
+    if (!uid || !canSyncRef.current) return;
     try {
       const db = getFirestore();
       const ref = doc(db, 'users', uid, 'states', 'finance');
@@ -108,7 +108,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     persistToStorage(data);
     // Also persist to Firestore under the logged-in user
     (async () => {
-      if (!uid) return;
+      if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'finance');
