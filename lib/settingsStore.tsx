@@ -151,7 +151,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // persist local immediately
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
       // persist remote if signed in and hydrated
-      if (uid && canSyncRef.current) {
+      if (uid) {
         const db = getFirestore();
         const ref = doc(db, 'users', uid);
         await setDoc(
