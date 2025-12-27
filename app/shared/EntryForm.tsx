@@ -29,7 +29,7 @@ export default function EntryForm({ initial, onSubmit }: Props) {
     setTitle(initial.title);
     setAmount(initial.amount.toString());
     setEntryType(initial.entryType);
-    setCategory(initial.category);
+    setCategory(initial.category ?? '');
     setDate(initial.date.slice(0, 10));
     setNotes(initial.notes ?? '');
   }, [initial?.id]);
