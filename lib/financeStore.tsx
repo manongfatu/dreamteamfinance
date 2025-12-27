@@ -89,10 +89,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const cooldownUntilRef = useRef<number>(0);
 
   const saveRemote = useCallback(async (next: YearData): Promise<boolean> => {
-    if (!uid || !canSyncRef.current) return;
-    if (Date.now() < cooldownUntilRef.current) return;
+    if (!uid || !canSyncRef.current) return false;
+    if (Date.now() < cooldownUntilRef.current) return false;
     const sig = JSON.stringify(next);
-    if (lastSavedSigRef.current === sig) return;
+    if (lastSavedSigRef.current === sig) return true;
     try {
       const db = getFirestore();
       const ref = doc(db, 'users', uid);
