@@ -18,6 +18,7 @@ type SettingsContextValue = {
   setFirstName: (name: string) => void;
   setLastName: (name: string) => void;
   setContactNumber: (phone: string) => void;
+  updateProfileAndSave: (firstName: string, lastName: string, contactNumber: string) => Promise<boolean>;
 };
 
 const DEFAULTS: Settings = {
@@ -54,6 +55,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const readyRef = useRef(false);
   const [uid, setUid] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
 
   // Persist to localStorage and (if signed in) to Firestore
   useEffect(() => {
@@ -67,7 +69,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     (async () => {
-      if (!uid) return;
+      if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'settings');
@@ -91,22 +93,32 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         unsubscribe = auth.onAuthStateChanged(async (u) => {
           setUid(u?.uid ?? null);
           setUserEmail(u?.email ?? null);
+          canSyncRef.current = false;
           if (!u?.uid) return;
           try {
             const db = getFirestore();
+            // Ensure root user doc exists with basic info
+            await setDoc(doc(db, 'users', u.uid), {
+              email: u.email ?? null,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+
             const ref = doc(db, 'users', u.uid, 'states', 'settings');
             const snap = await getDoc(ref);
             if (snap.exists()) {
               const remote = (snap.data()?.data ?? {}) as Partial<Settings>;
               setSettings((prev) => ({ ...prev, ...remote, email: prev.email || (u.email ?? '') }));
+              canSyncRef.current = true;
             } else {
               const initial = { ...settings };
               if (!initial.email && u.email) initial.email = u.email;
               await setDoc(ref, { data: initial, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
               setSettings(initial);
+              canSyncRef.current = true;
             }
           } catch {
             // ignore
+            canSyncRef.current = false;
           }
         });
       } catch {
@@ -132,14 +144,38 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setSettings(prev => ({ ...prev, contactNumber }));
   }, []);
 
+  // Explicit saver to avoid losing changes on quick logout/navigation
+  const updateProfileAndSave = useCallback(async (firstName: string, lastName: string, contactNumber: string) => {
+    const next = { ...settings, firstName, lastName, contactNumber };
+    setSettings(next);
+    try {
+      // persist local immediately
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      // persist remote if signed in and hydrated
+      if (uid && canSyncRef.current) {
+        const db = getFirestore();
+        const ref = doc(db, 'users', uid, 'states', 'settings');
+        await setDoc(
+          ref,
+          { data: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() },
+          { merge: true }
+        );
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }, [settings, uid, userEmail]);
+
   const value = useMemo<SettingsContextValue>(() => ({
     settings,
     setRemindersEnabled,
     setEmail,
     setFirstName,
     setLastName,
-    setContactNumber
-  }), [settings, setRemindersEnabled, setEmail, setFirstName, setLastName, setContactNumber]);
+    setContactNumber,
+    updateProfileAndSave
+  }), [settings, setRemindersEnabled, setEmail, setFirstName, setLastName, setContactNumber, updateProfileAndSave]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 }

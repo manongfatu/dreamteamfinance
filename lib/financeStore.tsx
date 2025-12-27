@@ -80,6 +80,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const initialised = useRef(false);
   const syncing = useRef(false);
+  const canSyncRef = useRef(false); // allow Firestore writes only after first hydration
 
   // Persist on changes
   useEffect(() => {
@@ -90,7 +91,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     persistToStorage(data);
     // Also persist to Firestore under the logged-in user
     (async () => {
-      if (!uid) return;
+      if (!uid || !canSyncRef.current) return;
       try {
         const db = getFirestore();
         const ref = doc(db, 'users', uid, 'states', 'finance');
@@ -112,9 +113,16 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         unsub = auth.onAuthStateChanged(async (u) => {
           setUid(u?.uid ?? null);
           setUserEmail(u?.email ?? null);
+          canSyncRef.current = false;
           if (!u?.uid) return;
           try {
             const db = getFirestore();
+            // Ensure root user doc exists with basic info
+            await setDoc(doc(db, 'users', u.uid), {
+              email: u.email ?? null,
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+
             const ref = doc(db, 'users', u.uid, 'states', 'finance');
             const snap = await getDoc(ref);
             if (snap.exists()) {
@@ -123,15 +131,19 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
                 syncing.current = true;
                 setData(remote);
                 syncing.current = false;
+                canSyncRef.current = true;
               } else {
                 // Initialize remote with current local data if empty
                 await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+                canSyncRef.current = true;
               }
             } else {
               await setDoc(ref, { data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+              canSyncRef.current = true;
             }
           } catch {
             // ignore fetch errors; keep local state
+            canSyncRef.current = false;
           }
         });
       } catch {

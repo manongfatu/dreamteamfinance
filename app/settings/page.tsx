@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { getFirebaseAuth } from '@lib/firebase/client';
 
 export default function SettingsPage() {
-  const { settings, setEmail, setRemindersEnabled, setFirstName, setLastName, setContactNumber } = useSettings();
+  const { settings, setEmail, setRemindersEnabled, updateProfileAndSave } = useSettings();
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loginEmail, setLoginEmail] = useState<string>('');
@@ -39,17 +39,12 @@ export default function SettingsPage() {
     draftLast !== settings.lastName ||
     draftContact !== settings.contactNumber;
 
-  function handleSaveProfile() {
-    try {
-      setProfileSaving(true);
-      setFirstName(draftFirst.trim());
-      setLastName(draftLast.trim());
-      setContactNumber(draftContact.trim());
-      setProfileSavedMsg('Profile saved.');
-      setTimeout(() => setProfileSavedMsg(null), 1500);
-    } finally {
-      setProfileSaving(false);
-    }
+  async function handleSaveProfile() {
+    setProfileSaving(true);
+    const ok = await updateProfileAndSave(draftFirst.trim(), draftLast.trim(), draftContact.trim());
+    setProfileSavedMsg(ok ? 'Profile saved.' : 'Failed to save profile.');
+    setTimeout(() => setProfileSavedMsg(null), 1500);
+    setProfileSaving(false);
   }
   async function handleTestEmail() {
     setLoading(true);
