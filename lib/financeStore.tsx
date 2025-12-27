@@ -11,7 +11,7 @@ import type {
 } from '../types/finance';
 import { getCurrentYear } from './date';
 import { getFirebaseAuth } from './firebase/client';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 type FinanceContextValue = {
   year: number;
@@ -83,22 +83,29 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const initialised = useRef(false);
   const syncing = useRef(false);
   const canSyncRef = useRef(false); // set true only after first remote read completes
-  const unsubscribeRef = useRef<null | (() => void)>(null);
   const [isReady, setIsReady] = useState(false); // UI readiness (after initial remote attempt)
   const saveTimerRef = useRef<number | null>(null);
+  const lastSavedSigRef = useRef<string | null>(null);
+  const cooldownUntilRef = useRef<number>(0);
 
   const saveRemote = useCallback(async (next: YearData) => {
     if (!uid) return;
+    if (Date.now() < cooldownUntilRef.current) return;
+    const sig = JSON.stringify(next);
+    if (lastSavedSigRef.current === sig) return;
     try {
       const db = getFirestore();
       const ref = doc(db, 'users', uid);
       await setDoc(ref, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+      lastSavedSigRef.current = sig;
     } catch {
       // swallow; UI stays responsive and localStorage has a copy
       if (process.env.NODE_ENV !== 'production') {
         // eslint-disable-next-line no-console
         console.error('[finance] Failed to write to Firestore');
       }
+      // back off to avoid hammering quota for 60s
+      cooldownUntilRef.current = Date.now() + 60_000;
     }
   }, [uid, userEmail]);
 
@@ -119,7 +126,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     saveTimerRef.current = window.setTimeout(() => {
       void saveRemote(data);
       saveTimerRef.current = null;
-    }, 300);
+    }, 1500);
   }, [data]);
 
   // Attach to auth and hydrate from Firestore if available
@@ -132,11 +139,6 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
           setUid(u?.uid ?? null);
           setUserEmail(u?.email ?? null);
           canSyncRef.current = false;
-          // detach previous finance snapshot
-          if (unsubscribeRef.current) {
-            unsubscribeRef.current();
-            unsubscribeRef.current = null;
-          }
           if (!u?.uid) { setIsReady(true); return; }
           try {
             const db = getFirestore();
@@ -149,19 +151,9 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
                 syncing.current = true;
                 setData(remote);
                 syncing.current = false;
+                lastSavedSigRef.current = JSON.stringify(remote);
               }
             }
-            // Subscribe to live updates so we always rehydrate from remote
-            unsubscribeRef.current = onSnapshot(ref, { includeMetadataChanges: true }, (docSnap) => {
-              // ignore local echoes
-              if (docSnap.metadata.hasPendingWrites) return;
-              if (!docSnap.exists()) return;
-              const remote = docSnap.data()?.finance as YearData | undefined;
-              if (!remote || !Array.isArray(remote.months) || remote.months.length !== 12) return;
-              syncing.current = true;
-              setData(remote);
-              syncing.current = false;
-            });
             canSyncRef.current = true; // now safe to write
             setIsReady(true);
           } catch {
@@ -175,7 +167,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
         setIsReady(true);
       }
     })();
-    return () => { if (authUnsub) authUnsub(); if (unsubscribeRef.current) unsubscribeRef.current(); };
+    return () => { if (authUnsub) authUnsub(); };
   }, []);
 
   // Flush when page is hidden/unloaded to reduce data loss risk
