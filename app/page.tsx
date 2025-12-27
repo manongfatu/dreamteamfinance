@@ -11,7 +11,7 @@ import { getFirebaseAuth } from '@/lib/firebase/client';
 import { signOut } from 'firebase/auth';
 
 export default function DashboardPage() {
-  const { data, computeTotals, computeYtdTotals, allEntriesYtd } = useFinance();
+  const { data, computeTotals, computeYtdTotals, allEntriesYtd, flushRemote } = useFinance();
 
   const ytdTotals = computeYtdTotals();
   const barData = useMemo(() => {
@@ -32,6 +32,8 @@ export default function DashboardPage() {
             className="button"
             onClick={async () => {
               try {
+                // Flush latest finance state to Firestore before logging out
+                try { await flushRemote(); } catch {}
                 // Clear finance local state
                 try { localStorage.removeItem('pfm:v1'); } catch {}
                 // Sign out Firebase client

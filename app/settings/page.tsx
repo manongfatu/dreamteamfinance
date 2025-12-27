@@ -1,10 +1,12 @@
 "use client";
 import { useSettings } from '@lib/settingsStore';
+import { useFinance } from '@lib/financeStore';
 import { useEffect, useState } from 'react';
 import { getFirebaseAuth } from '@lib/firebase/client';
 
 export default function SettingsPage() {
   const { settings, setEmail, setRemindersEnabled, updateProfileAndSave } = useSettings();
+  const { flushRemote } = useFinance();
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loginEmail, setLoginEmail] = useState<string>('');
@@ -182,6 +184,7 @@ export default function SettingsPage() {
                 className="button"
                 onClick={async () => {
                   try {
+                    try { await flushRemote(); } catch {}
                     try { localStorage.removeItem('pfm:v1'); } catch {}
                     await fetch('/api/session/logout', { method: 'POST' });
                   } finally {

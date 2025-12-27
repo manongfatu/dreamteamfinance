@@ -30,6 +30,7 @@ type FinanceContextValue = {
   computeTotals: (entries: Entry[]) => SummaryTotals;
   computeYtdTotals: () => SummaryTotals;
   allEntriesYtd: () => Entry[];
+  flushRemote: () => Promise<void>;
 };
 
 const FinanceContext = createContext<FinanceContextValue | null>(null);
@@ -90,6 +91,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       await setDoc(ref, { data: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
     } catch {
       // swallow; UI stays responsive and localStorage has a copy
+      if (process.env.NODE_ENV !== 'production') {
+        // eslint-disable-next-line no-console
+        console.error('[finance] Failed to write to Firestore');
+      }
     }
   }, [uid, userEmail]);
 
@@ -370,7 +375,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     toggleInstallmentPayment,
     computeTotals,
     computeYtdTotals,
-    allEntriesYtd
+    allEntriesYtd,
+    flushRemote: () => saveRemote(data)
   }), [
     data,
     getMonthData,
@@ -385,7 +391,8 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
     toggleInstallmentPayment,
     computeTotals,
     computeYtdTotals,
-    allEntriesYtd
+    allEntriesYtd,
+    saveRemote
   ]);
 
   return <FinanceContext.Provider value={value}>{children}</FinanceContext.Provider>;
