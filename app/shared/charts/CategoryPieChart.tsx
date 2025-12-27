@@ -8,7 +8,8 @@ export default function CategoryPieChart({ entries }: { entries: Entry[] }) {
   const expenses = entries.filter(e => e.entryType === 'expense' || e.entryType === 'bill' || e.entryType === 'savings' || e.entryType === 'investment');
   const byCategory = new Map<string, number>();
   for (const e of expenses) {
-    byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + e.amount);
+    const key = (e.category ?? '').trim() || 'Uncategorized';
+    byCategory.set(key, (byCategory.get(key) ?? 0) + e.amount);
   }
   const data = Array.from(byCategory.entries()).map(([name, value]) => ({ name, value }));
 
