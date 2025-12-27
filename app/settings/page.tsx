@@ -184,8 +184,9 @@ export default function SettingsPage() {
                 className="button"
                 onClick={async () => {
                   try {
-                    try { await flushRemote(); } catch {}
-                    try { localStorage.removeItem('pfm:v1'); } catch {}
+                    let saved = false;
+                    try { saved = await flushRemote(); } catch { saved = false; }
+                    if (saved) { try { localStorage.removeItem('pfm:v1'); } catch {} }
                     await fetch('/api/session/logout', { method: 'POST' });
                   } finally {
                     window.location.href = '/login';

@@ -36,9 +36,10 @@ export default function DashboardPage() {
             onClick={async () => {
               try {
                 // Flush latest finance state to Firestore before logging out
-                try { await flushRemote(); } catch {}
-                // Clear finance local state
-                try { localStorage.removeItem('pfm:v1'); } catch {}
+                let saved = false;
+                try { saved = await flushRemote(); } catch { saved = false; }
+                // Clear local only if we confirmed remote save, else keep as fallback
+                if (saved) { try { localStorage.removeItem('pfm:v1'); } catch {} }
                 // Sign out Firebase client
                 try { const auth = await getFirebaseAuth(); await signOut(auth); } catch {}
                 // Clear session cookie on server

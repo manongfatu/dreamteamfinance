@@ -31,7 +31,7 @@ type FinanceContextValue = {
   computeTotals: (entries: Entry[]) => SummaryTotals;
   computeYtdTotals: () => SummaryTotals;
   allEntriesYtd: () => Entry[];
-  flushRemote: () => Promise<void>;
+  flushRemote: () => Promise<boolean>;
 };
 
 const FinanceContext = createContext<FinanceContextValue | null>(null);
@@ -88,7 +88,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
   const lastSavedSigRef = useRef<string | null>(null);
   const cooldownUntilRef = useRef<number>(0);
 
-  const saveRemote = useCallback(async (next: YearData) => {
+  const saveRemote = useCallback(async (next: YearData): Promise<boolean> => {
     if (!uid || !canSyncRef.current) return;
     if (Date.now() < cooldownUntilRef.current) return;
     const sig = JSON.stringify(next);
@@ -98,6 +98,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       const ref = doc(db, 'users', uid);
       await setDoc(ref, { finance: next, email: userEmail ?? null, updatedAt: new Date().toISOString() }, { merge: true });
       lastSavedSigRef.current = sig;
+      return true;
     } catch {
       // swallow; UI stays responsive and localStorage has a copy
       if (process.env.NODE_ENV !== 'production') {
@@ -106,6 +107,7 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
       }
       // back off to avoid hammering quota for 10s
       cooldownUntilRef.current = Date.now() + 10_000;
+      return false;
     }
   }, [uid, userEmail]);
 
@@ -153,6 +155,10 @@ export function FinanceProvider({ children }: { children: React.ReactNode }) {
                 syncing.current = false;
                 lastSavedSigRef.current = JSON.stringify(remote);
               }
+            } else {
+              // Seed remote with current local data for first-time user
+              await setDoc(ref, { finance: data, email: u.email ?? null, updatedAt: new Date().toISOString() }, { merge: true });
+              lastSavedSigRef.current = JSON.stringify(data);
             }
             canSyncRef.current = true; // now safe to write
             setIsReady(true);

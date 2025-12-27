@@ -154,11 +154,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (uid) {
         const db = getFirestore();
         const ref = doc(db, 'users', uid);
-        await setDoc(
-          ref,
-          { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() },
-          { merge: true }
-        );
+        // fire-and-forget to avoid UI hanging under backoff
+        setDoc(ref, { settings: next, email: userEmail ?? next.email ?? null, updatedAt: new Date().toISOString() }, { merge: true })
+          .catch(() => {/* swallow */});
       }
       return true;
     } catch {
